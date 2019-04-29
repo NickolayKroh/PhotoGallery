@@ -3,9 +3,9 @@ package com.bignerdranch.android.photogallery;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
+import androidx.annotation.Nullable;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
 
 public class PhotoGalleryActivity extends SingleFragmentActivity {
 	public interface OnBackPressedListener{
@@ -14,6 +14,8 @@ public class PhotoGalleryActivity extends SingleFragmentActivity {
 
 	@Override
 	protected void onCreate(@Nullable Bundle savedInstanceState) {
+		//StrictMode.enableDefaults();
+		//StrictMode.TreadPolicity tp = new Builder
 		setTheme(R.style.AppTheme);
 		super.onCreate(savedInstanceState);
 	}
@@ -23,7 +25,6 @@ public class PhotoGalleryActivity extends SingleFragmentActivity {
 		setTheme(R.style.AppTheme);
 		super.onResume();
 	}
-
 
 	@Override
     protected Fragment createFragment() {

@@ -1,19 +1,20 @@
 package com.bignerdranch.android.photogallery;
 
+import androidx.lifecycle.Observer;
+import android.animation.LayoutTransition;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.net.ConnectivityManager;
 import android.os.*;
-import android.support.annotation.NonNull;
-import android.support.v4.app.FragmentActivity;
-import android.support.v4.app.LoaderManager;
-import android.support.v4.content.Loader;
-import android.support.v7.app.AlertDialog;
-import android.support.v7.widget.GridLayoutManager;
-import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.SearchView;
+import androidx.annotation.NonNull;
+import androidx.fragment.app.FragmentActivity;
+import androidx.appcompat.app.AlertDialog;
+import androidx.lifecycle.ViewModelProviders;
+import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.appcompat.widget.SearchView;
 import android.view.*;
 import android.util.*;
 import java.util.*;
@@ -21,7 +22,6 @@ import android.graphics.drawable.*;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import com.bignerdranch.android.photogallery.PhotoGalleryFragmentComponents.CacheComponentCallbacks2;
-import com.bignerdranch.android.photogallery.PhotoGalleryFragmentComponents.ItemsLoader;
 import com.bignerdranch.android.photogallery.PhotoGalleryFragmentComponents.ScrollListener;
 
 import static android.content.Context.CONNECTIVITY_SERVICE;
@@ -30,35 +30,42 @@ public class PhotoGalleryFragment extends VisibleFragment
 		implements
 			PhotoGalleryActivity.OnBackPressedListener {
 	private static final String TAG = "PhotoGallery";
-	private static final int LOADER_ID = 1;
+	private static final int NETWORK_DIALOG = 0;
 
-	private RecyclerView mPhotoRecyclerView;
+	private FragmentActivity mActivity;
 	private PhotoAdapter mAdapter;
-	private List<GalleryItem> mItems = new ArrayList<>();
 	private ThumbnailDownloader<Integer> mThumbnailDownloader;
 	private ImageCache mImageCache;
 	private ProgressBar mProgressBar;
 	private SearchView mSearchView;
-	private boolean isNextPagePreparing = false;
-	private int mPage;
+	private GalleryViewModel mViewModel;
 
-	private ItemsLoaderManager mItemsLoaderManager;
+	public void preCachingDown(int i) {
+		mAdapter.preCachingUnder(i);
+	}
+	
+	public void preCachingUp(int i) {
+		mAdapter.preCachingUpper(i);
+	}
 
 	@Override
-	public void onCreate( Bundle bundle ) {
+	public void onCreate(Bundle bundle) {
 		super.onCreate(bundle);
-		setRetainInstance(true);
 		setHasOptionsMenu(true);
 
-		mItemsLoaderManager = new ItemsLoaderManager();
-		loadFirstPage();
+		if( getActivity() != null )
+			mActivity = getActivity();
+
+		mViewModel = ViewModelProviders.of(this).get(GalleryViewModel.class);
+
+		if(mViewModel.getItems().getValue() == null)
+			loadFirstPage();
 
 		mImageCache = ImageCache.getInstance();
 
 		Handler responseHandler = new Handler();
 		mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
-		mThumbnailDownloader.setThumbnailDownloadListener(
-				new ThumbnailDownloader.ThumbnailDownloaderListener<Integer>() {
+		mThumbnailDownloader.setThumbnailDownloadListener(new ThumbnailDownloader.ThumbnailDownloaderListener<Integer>() {
 			@Override
 			public void onThumbnailDownloaded(Integer i) {
 				mAdapter.notifyItemChanged( i, PhotoAdapter.PAYLOAD_DRAWABLE );
@@ -66,22 +73,41 @@ public class PhotoGalleryFragment extends VisibleFragment
 		} );
 		mThumbnailDownloader.start();
 		mThumbnailDownloader.getLooper();
-		Log.i( TAG, "Background thread started" );
-
+//manually config change
 		getActivity().registerComponentCallbacks(new CacheComponentCallbacks2());
 	}
 	
 	@Override
 	public View onCreateView(@NonNull LayoutInflater inflater, ViewGroup container,
-							 							Bundle savedInstanceState ) {
-		final View v = inflater.inflate( R.layout.fragment_photo_gallery, container,
-																	false );
+							 Bundle savedInstanceState) {
+		final View v = inflater.inflate(R.layout.fragment_photo_gallery, container,
+										false);
 
 		mProgressBar = v.findViewById(R.id.progress_bar_gallery);
 
-		mPhotoRecyclerView = v.findViewById( R.id.photo_recycler_view );
+		RecyclerView mPhotoRecyclerView = v.findViewById(R.id.photo_recycler_view);
 		mPhotoRecyclerView.setLayoutManager(new GridLayoutManager(getActivity(), getSpanCount()));
-		mPhotoRecyclerView.addOnScrollListener(new ScrollListener(this) );
+		mAdapter = new PhotoAdapter();
+		mPhotoRecyclerView.setAdapter(mAdapter);
+
+		mPhotoRecyclerView.addOnScrollListener(new ScrollListener(mViewModel, this ));
+
+		LayoutTransition lt = mPhotoRecyclerView.getLayoutTransition();
+		if(lt != null) {
+			lt.enableTransitionType(LayoutTransition.CHANGING);
+			mPhotoRecyclerView.setLayoutTransition(lt);
+		}
+		else
+			Log.i("anim","no LT");
+
+		mViewModel.getItems().observe(this, new Observer<List<GalleryItem>>() {
+			@Override
+			public void onChanged(List<GalleryItem> items) {
+				Log.i(TAG, "onChanged Fragment");
+				if( isAdded() )
+					mAdapter.setItems(items);
+			}
+		});
 
 		return v;
 	}
@@ -90,13 +116,14 @@ public class PhotoGalleryFragment extends VisibleFragment
 	public void onDestroyView() {
 		super.onDestroyView();
 		mThumbnailDownloader.clearQueue();
+		Log.i(TAG,"Thumbnail queue clear");
 	}
 	
 	@Override
 	public void onDestroy() {
 		super.onDestroy();
 		mThumbnailDownloader.quit();
-		Log.i( TAG, "Background thread destroyed");
+		Log.i( TAG, "Background thread Thumbnail destroyed");
 	}
 	
 	@Override
@@ -116,11 +143,11 @@ public class PhotoGalleryFragment extends VisibleFragment
 			}
 		} );
 
-		MenuItem toggleItem = menu.findItem( R.id.menu_item_toggle_polling );
-		if( PollService.isServicesAlarmOn( getActivity() ) )
-			toggleItem.setTitle( R.string.stop_polling );
-		else
-			toggleItem.setTitle( R.string.start_polling );
+//		MenuItem toggleItem = menu.findItem( R.id.menu_item_toggle_polling );
+//		if( PollService.isServicesAlarmOn( getActivity() ) )
+//			toggleItem.setTitle( R.string.stop_polling );
+//		else
+//			toggleItem.setTitle( R.string.start_polling );
 	}
 
 	@Override
@@ -129,16 +156,18 @@ public class PhotoGalleryFragment extends VisibleFragment
 			case R.id.menu_item_clear:
 				mThumbnailDownloader.clearQueue();
 				QueryPreferences.setStoredQuery( getActivity(), null );
-				clearAdapter();
+				mAdapter.clearAdapter();
 				loadFirstPage();
 				return true;
-			case R.id.menu_item_toggle_polling:
-				boolean shouldStartAlarm = !PollService.isServicesAlarmOn( getActivity() );
-				PollService.setServiceAlarm( getActivity(), shouldStartAlarm );
-				getActivity().invalidateOptionsMenu();
-				return true;
-			default:
+//			case R.id.menu_item_toggle_polling:
+//				boolean shouldStartAlarm = !PollService.isServicesAlarmOn( getActivity() );
+//				PollService.setServiceAlarm( getActivity(), shouldStartAlarm );
+//				getActivity().invalidateOptionsMenu();
+//				return true;
+			default:{
+				Log.i(TAG, "pressed -" + item.getTitle() );
 				return super.onOptionsItemSelected(item);
+			}
 		}
 	}
 
@@ -156,51 +185,28 @@ public class PhotoGalleryFragment extends VisibleFragment
 
 	@Override
 	public void onActivityResult(int requestCode, int resultCode, Intent data) {
-		if(requestCode == 0)
+		Log.i(TAG,"onActResult");
+		if(requestCode == NETWORK_DIALOG)
 			loadPage();
 		else
 			super.onActivityResult(requestCode, resultCode, data);
 	}
 
-	private void loadFirstPage(){
-		mPage = 1;
+	private void loadFirstPage() {
+		Log.i(TAG,"loadFirstPage");
+		mViewModel.setPage(1);
 		loadPage();
 	}
 
-	private void clearAdapter() {
-		mItems.clear();
-		if(mAdapter != null)
-			mAdapter.notifyDataSetChanged();
-		mProgressBar.setVisibility(View.VISIBLE);
-	}
-
-	public void onReachedEndOfPage(){
-		if( !isNextPagePreparing ) {
-			isNextPagePreparing = true;
-			++mPage;
-			loadPage();
-		}
-	}
-
 	private void loadPage() {
-		if( !isNetworkAvailableAndConnected() )
-			showDialogNoNetworkAvailable();
+		if(isNetworkAvailableAndConnected())
+			mViewModel.loadNewPage();
 		else
-			startItemsLoader();
+			showDialogNoNetworkAvailable();
 	}
 
-	private void startItemsLoader() {
-		Bundle bundle = new Bundle();
-		String query = QueryPreferences.getStoredQuery(getActivity());
-		bundle.putString(ItemsLoader.ARGS_QUERY, query);
-		bundle.putInt(ItemsLoader.ARGS_PAGE, mPage);
-		Loader<List<GalleryItem>> loader = getLoaderManager()
-				.restartLoader(LOADER_ID, bundle, mItemsLoaderManager);
-		loader.forceLoad();
-	}
-
-	private int getSpanCount() {
-		Resources r = getActivity().getResources();
+	public int getSpanCount() {
+		Resources r = mActivity.getResources();
 		float itemHeightPx = r.getDimension(R.dimen.item_height_dp);
 		float screenWidthPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
 				r.getConfiguration().screenWidthDp,
@@ -208,17 +214,8 @@ public class PhotoGalleryFragment extends VisibleFragment
 		return Math.round(screenWidthPx / itemHeightPx);
 	}
 
-	private int countItemsOnPage(){
-		Resources r = getActivity().getResources();
-		float itemHeightPx = r.getDimension(R.dimen.item_height_dp);
-		float screenHeightPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
-				r.getConfiguration().screenHeightDp,
-				r.getDisplayMetrics());
-		return 3*Math.round(screenHeightPx / itemHeightPx);
-	}
-
 	private void showDialogNoNetworkAvailable() {
-		AlertDialog dialog = new AlertDialog.Builder(getActivity())
+		AlertDialog dialog = new AlertDialog.Builder(mActivity)
 			.setTitle("Network is not available")
 			.setMessage("Please check your connection")
 			.setCancelable(true)
@@ -226,13 +223,13 @@ public class PhotoGalleryFragment extends VisibleFragment
 				@Override
 				public void onClick(DialogInterface dialog, int i) {
 					Intent intent = new Intent("android.settings.SETTINGS");
-					startActivityForResult(intent, 0);
+					startActivityForResult(intent, NETWORK_DIALOG);
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface dialog, int i) {
-					getActivity().finish();
+					mActivity.finish();
 				}
 			})
 			.create();
@@ -240,24 +237,12 @@ public class PhotoGalleryFragment extends VisibleFragment
 	}
 
 	private boolean isNetworkAvailableAndConnected() {
-		ConnectivityManager cm = (ConnectivityManager) getActivity()
+		ConnectivityManager cm = (ConnectivityManager) mActivity
 				.getSystemService( CONNECTIVITY_SERVICE );
+		if(cm == null)
+			return false;
 		boolean isNetworkAvailable = cm.getActiveNetworkInfo() != null;
 		return isNetworkAvailable && cm.getActiveNetworkInfo().isConnected();
-	}
-
-	private void setupAdapter( List<GalleryItem> list ) {
-		if( isAdded() ) {
-			if( isNextPagePreparing && mAdapter != null ) {
-				mAdapter.addGalleryItems(list);
-				isNextPagePreparing = false;
-			} else {
-				mAdapter = new PhotoAdapter(list);
-				mPhotoRecyclerView.setAdapter(mAdapter);
-			}
-
-			mProgressBar.setVisibility(View.INVISIBLE);
-		}
 	}
 
 	private class PhotoHolder extends RecyclerView.ViewHolder
@@ -265,7 +250,7 @@ public class PhotoGalleryFragment extends VisibleFragment
 		private ImageView mItemImageView;
 		private GalleryItem mGalleryItem;
 		
-		private PhotoHolder( View itemView ) {
+		private PhotoHolder(View itemView) {
 			super(itemView);
 			
 			mItemImageView = (ImageView) itemView;
@@ -281,7 +266,7 @@ public class PhotoGalleryFragment extends VisibleFragment
 		}
 		
 		@Override
-		public void onClick( View v ) {
+		public void onClick(View v) {
 			Intent i = PhotoPageActivity.newIntent( getActivity(), mGalleryItem.getPhotoPageUri() );
 			startActivity(i);
 		}
@@ -289,15 +274,32 @@ public class PhotoGalleryFragment extends VisibleFragment
 	
 	private class PhotoAdapter extends RecyclerView.Adapter<PhotoHolder> {
 		public static final String PAYLOAD_DRAWABLE = "PAYLOAD_DRAWABLE";
+		private List<GalleryItem> mItems;
+		private int mItemsOnScreen;
+		private int mPrevSize = 0;
 		
-		private PhotoAdapter( List<GalleryItem> galleryItems ){
-			mItems = galleryItems;
+		private PhotoAdapter() {
+			mItems = new ArrayList<>();
+			mItemsOnScreen = getItemsCountOnAPage();
 		}
 
-		private void addGalleryItems(List<GalleryItem> galleryItems){
-			int positionStart = mItems.size();
-			mItems.addAll(galleryItems);
-			this.notifyItemRangeInserted( positionStart, galleryItems.size() );
+		private void savePrevSize() {
+			mPrevSize = mItems.size();
+		}
+
+		private void setItems(@NonNull List<GalleryItem> galleryItems) {
+			mItems = galleryItems;
+			notifyItemRangeInserted(mPrevSize, galleryItems.size() - mPrevSize);
+			preCachingUnder(mPrevSize - getItemsCountOnAPage() - 1 );
+			savePrevSize();
+			mProgressBar.setVisibility(View.INVISIBLE);
+		}
+		
+		private void clearAdapter() {
+			mItems.clear();
+			savePrevSize();
+			mAdapter.notifyDataSetChanged();
+			mProgressBar.setVisibility(View.VISIBLE);
 		}
 		
 		@Override
@@ -312,8 +314,8 @@ public class PhotoGalleryFragment extends VisibleFragment
 		public void onBindViewHolder(@NonNull PhotoHolder photoHolder, int position ) {
 			GalleryItem galleryItem = mItems.get(position);
 			photoHolder.bindGalleryItem(galleryItem);
-			photoHolder.bindDrawable( getDrawable( galleryItem.getUrl() ) );
-			preCaching(position);
+			photoHolder.bindDrawable( getDrawable(galleryItem.getUrl()) );
+			//preCachingUnder(position);
 		}
 
 		@Override
@@ -321,7 +323,7 @@ public class PhotoGalleryFragment extends VisibleFragment
 									 @NonNull List<Object> payloads) {
 			if( !payloads.isEmpty() ) {
 				GalleryItem galleryItem = mItems.get(position);
-				photoHolder.bindDrawable( getDrawable( galleryItem.getUrl() ) );
+				photoHolder.bindDrawable( getDrawable(galleryItem.getUrl()) );
 			} else
 				super.onBindViewHolder(photoHolder, position, payloads);
 		}
@@ -343,20 +345,35 @@ public class PhotoGalleryFragment extends VisibleFragment
 			return drawable;
 		}
 
-		private void preCaching(int current){
-			int start = current - countItemsOnPage();
-			if(	start < 0 )
-				start = 0;
-
-			int end = current + countItemsOnPage();
+		private void preCachingUpper(int firstVisible) {
+			int i = firstVisible - 2*mItemsOnScreen;
+			if(i < 0)
+				i = 0;
+			for(; i < firstVisible; ++i)
+				cache(i);
+		}
+		
+		private void preCachingUnder(int firstVisible) {
+			int end = firstVisible + 3*mItemsOnScreen;
 			if( end > mItems.size() )
 				end = mItems.size();
+			for(int i = firstVisible + mItemsOnScreen + 1; i < end; ++i)
+				cache(i);
+		}
 
-			for( int i = start; i < end; ++i ) {
-				String url = mItems.get(i).getUrl();
-				if( mImageCache.get(url) == null )
-					mThumbnailDownloader.queueThumbnail( i, url );
-			}
+		private void cache(int itemPos) {
+			String url = mItems.get(itemPos).getUrl();
+			if( mImageCache.get(url) == null )
+				mThumbnailDownloader.queueThumbnail(itemPos, url);
+		}
+
+		private int getItemsCountOnAPage() {
+			Resources r = mActivity.getResources();
+			float itemHeightPx = r.getDimension(R.dimen.item_height_dp);
+			float screenHeightPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP,
+					r.getConfiguration().screenHeightDp,
+					r.getDisplayMetrics());
+			return getSpanCount()*Math.round(screenHeightPx / itemHeightPx);
 		}
 	}
 
@@ -365,11 +382,11 @@ public class PhotoGalleryFragment extends VisibleFragment
 		public boolean onQueryTextSubmit(String s) {
 			mThumbnailDownloader.clearQueue();
 			QueryPreferences.setStoredQuery(getActivity(), s);
+			mAdapter.clearAdapter();
 			loadFirstPage();
-			mSearchView.setQuery( "",false );
+			mSearchView.setQuery("", false);
 			mSearchView.setIconified(true);
 			mSearchView.clearFocus();
-			clearAdapter();
 			return true;
 		}
 
@@ -377,27 +394,5 @@ public class PhotoGalleryFragment extends VisibleFragment
 		public boolean onQueryTextChange(String s) {
 			return false;
 		}
-	}
-
-	private class ItemsLoaderManager
-			implements LoaderManager.LoaderCallbacks<List<GalleryItem>> {
-		@NonNull
-		@Override
-		public Loader<List<GalleryItem>> onCreateLoader(int id, Bundle bundle) {
-			return new ItemsLoader(getActivity(), bundle);
-		}
-
-		@Override
-		public void onLoadFinished(@NonNull Loader<List<GalleryItem>> loader, List<GalleryItem> items) {
-			if( items.size() > 0 )
-				setupAdapter(items);
-			else {
-				--mPage;
-				isNextPagePreparing = false;
-			}
-		}
-
-		@Override
-		public void onLoaderReset(@NonNull Loader<List<GalleryItem>> loader) {}
 	}
 }

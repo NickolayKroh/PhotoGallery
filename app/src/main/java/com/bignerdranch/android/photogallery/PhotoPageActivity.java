@@ -1,12 +1,10 @@
 package com.bignerdranch.android.photogallery;
-import android.app.ActionBar;
 import android.content.*;
 import android.net.*;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
-import android.util.Log;
+import androidx.annotation.Nullable;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
 
 public class PhotoPageActivity extends SingleFragmentActivity {
 	public interface OnBackPressedListener{

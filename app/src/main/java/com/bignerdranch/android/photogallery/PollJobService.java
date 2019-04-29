@@ -13,7 +13,7 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.os.AsyncTask;
 import android.os.Build;
-import android.support.annotation.RequiresApi;
+import androidx.annotation.RequiresApi;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 

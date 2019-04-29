@@ -3,7 +3,7 @@ package com.bignerdranch.android.photogallery;
 import android.app.Activity;
 import android.app.Notification;
 import android.content.*;
-import android.support.v4.app.NotificationManagerCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 public class NotificationReceiver extends BroadcastReceiver
 {
