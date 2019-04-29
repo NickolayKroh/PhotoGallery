@@ -1,8 +1,8 @@
 package com.bignerdranch.android.photogallery;
 
 import android.graphics.Bitmap;
-import android.support.annotation.NonNull;
-import android.support.v4.util.LruCache;
+import androidx.annotation.NonNull;
+import androidx.collection.LruCache;
 
 public class ImageCache extends LruCache<String, Bitmap> {
 	private static ImageCache sImageCache;

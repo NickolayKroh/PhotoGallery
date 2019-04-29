@@ -1,9 +1,9 @@
 package com.bignerdranch.android.photogallery;
 import android.content.Intent;
 import android.net.*;
-import android.support.annotation.NonNull;
-import android.support.annotation.RequiresApi;
-import android.support.v7.app.AppCompatActivity;
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
+import androidx.appcompat.app.AppCompatActivity;
 import android.util.Log;
 import android.webkit.*;
 import android.os.*;
@@ -56,6 +56,10 @@ public class PhotoPageFragment extends VisibleFragment implements PhotoPageActiv
 				AppCompatActivity activity = (AppCompatActivity) getActivity();
 				if( activity != null && activity.getSupportActionBar() != null )
 					activity.getSupportActionBar().setSubtitle(title);
+			}
+			
+			void onJsAlert() {
+				
 			}
 		} );
 		mWebView.setWebViewClient( new WebViewClient(){

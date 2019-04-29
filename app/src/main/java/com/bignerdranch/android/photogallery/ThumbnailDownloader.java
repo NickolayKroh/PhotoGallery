@@ -1,6 +1,9 @@
 package com.bignerdranch.android.photogallery;
+
 import android.os.*;
 import android.util.*;
+
+import java.lang.ref.WeakReference;
 import java.util.concurrent.*;
 import java.io.*;
 import android.graphics.*;
@@ -10,7 +13,7 @@ public class ThumbnailDownloader<T> extends HandlerThread {
 	private static final int MESSAGE_DOWNLOAD = 0;
 	
 	private boolean mHasQuit = false;
-	private Handler mRequestHandler;
+	private StaticHandler<T> mRequestHandler;
 	private ConcurrentHashMap<T,String> mRequestMap = new ConcurrentHashMap<>();
 	private Handler mResponseHandler;
 	private ThumbnailDownloaderListener<T> mThumbnailDownloaderListener;
@@ -30,21 +33,13 @@ public class ThumbnailDownloader<T> extends HandlerThread {
 
 	@Override
 	protected void onLooperPrepared() {
-		mRequestHandler = new Handler() {
-			@Override
-			public void handleMessage( Message msg ) {
-				if( msg.what == MESSAGE_DOWNLOAD ) {
-					T target = (T) msg.obj;
-					Log.i( TAG, "Got a request for target: " + target.toString() );
-					handleRequest(target);
-				}
-			}
-		};
+		mRequestHandler = new StaticHandler<>(this);
 	}
 	
 	@Override
 	public boolean quit() {
 		mHasQuit = true;
+		Log.i("PhotoGallery", "ThumbD Quit");
 		return super.quit();
 	}
 	
@@ -95,4 +90,22 @@ public class ThumbnailDownloader<T> extends HandlerThread {
 		}
 	}
 	
+	static class StaticHandler<T> extends Handler {
+		WeakReference< ThumbnailDownloader<T> > mThumbnailDownloader;
+
+		StaticHandler(ThumbnailDownloader<T> thumbnailDownloader) {
+			mThumbnailDownloader = new WeakReference<>(thumbnailDownloader);
+		}
+
+		@Override
+		@SuppressWarnings("unchecked")
+		public void handleMessage(Message msg) {
+			if( msg.what == MESSAGE_DOWNLOAD ) {
+				T target = (T) msg.obj;
+				Log.i( TAG, "Got a request for target: " + target.toString() );
+				if(mThumbnailDownloader != null)
+					mThumbnailDownloader.get().handleRequest(target);
+			}
+		}
+	}
 }
